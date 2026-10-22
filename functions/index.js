@@ -11,10 +11,57 @@ initializeApp();
 
 const db = getFirestore();
 
+const MAX_SYMPTOMS_LENGTH = 2000;
+const MAX_FIELD_LENGTH = 50;
+
+/**
+ * Verifies the Firebase ID token in the Authorization header.
+ * @param {object} req The incoming request.
+ * @return {Promise<object|null>} The decoded token, or null if missing.
+ */
+async function verifyRequestToken(req) {
+  const authorization = req.headers.authorization || "";
+  const match = authorization.match(/^Bearer (.+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return getAuth().verifyIdToken(match[1]);
+}
+
+/**
+ * Returns a trimmed string capped at maxLength, or "" for non-strings.
+ * @param {*} value The value to clean.
+ * @param {number} maxLength The maximum allowed length.
+ * @return {string} The cleaned string.
+ */
+function cleanText(value, maxLength) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value).trim().slice(0, maxLength);
+}
+
+/**
+ * Checks whether an error came from an invalid or expired ID token.
+ * @param {object} error The caught error.
+ * @return {boolean} True for token errors.
+ */
+function isTokenError(error) {
+  return (
+    error.code === "auth/argument-error" ||
+    error.code === "auth/id-token-expired" ||
+    error.code === "auth/id-token-revoked" ||
+    error.code === "auth/invalid-id-token"
+  );
+}
 
 exports.analyzeSymptoms = onRequest(
   {
     cors: true,
+    maxInstances: 5,
   },
   async (req, res) => {
     if (req.method !== "POST") {
@@ -24,6 +71,21 @@ exports.analyzeSymptoms = onRequest(
     }
 
     try {
+      // Only signed-in, verified users may use Vet-Bot.
+      const decodedToken = await verifyRequestToken(req);
+
+      if (!decodedToken) {
+        return res.status(401).json({
+          error: "Authentication required.",
+        });
+      }
+
+      if (decodedToken.email_verified !== true) {
+        return res.status(403).json({
+          error: "Please verify your email first.",
+        });
+      }
+
       const apiKey = process.env.GEMINI_API_KEY;
 
       if (!apiKey) {
@@ -37,17 +99,22 @@ exports.analyzeSymptoms = onRequest(
         apiKey,
       });
 
-      const {
-        symptoms,
-        duration,
-        severity,
-        species,
-        age,
-      } = req.body || {};
+      const body = req.body || {};
+      const symptoms = cleanText(body.symptoms, MAX_SYMPTOMS_LENGTH + 1);
+      const duration = cleanText(body.duration, MAX_FIELD_LENGTH);
+      const severity = cleanText(body.severity, MAX_FIELD_LENGTH);
+      const species = cleanText(body.species, MAX_FIELD_LENGTH);
+      const age = cleanText(body.age, MAX_FIELD_LENGTH);
 
-      if (!symptoms || !symptoms.trim()) {
+      if (!symptoms) {
         return res.status(400).json({
           error: "Symptoms are required.",
+        });
+      }
+
+      if (symptoms.length > MAX_SYMPTOMS_LENGTH) {
+        return res.status(400).json({
+          error: `Please keep symptoms under ${MAX_SYMPTOMS_LENGTH} characters.`,
         });
       }
 
@@ -126,10 +193,26 @@ Return ONLY valid JSON matching this structure:
         },
       });
 
-      const result = JSON.parse(response.text);
+      let result;
+
+      try {
+        result = JSON.parse(response.text || "");
+      } catch (parseError) {
+        console.error("Gemini returned invalid JSON:", parseError, response.text);
+
+        return res.status(502).json({
+          error: "Vet-Bot could not produce an answer. Please try again.",
+        });
+      }
 
       return res.status(200).json(result);
     } catch (error) {
+      if (isTokenError(error)) {
+        return res.status(401).json({
+          error: "Invalid or expired authentication token.",
+        });
+      }
+
       console.error("Gemini symptom analysis failed:", error);
 
       return res.status(500).json({
@@ -150,16 +233,13 @@ exports.getAdminOverview = onRequest(
 
     try {
       // Verify the caller's Firebase ID token.
-      const authorization = req.headers.authorization || "";
-      const match = authorization.match(/^Bearer (.+)$/);
+      const decodedToken = await verifyRequestToken(req);
 
-      if (!match) {
+      if (!decodedToken) {
         return res.status(401).json({
           error: "Authentication required.",
         });
       }
-
-      const decodedToken = await getAuth().verifyIdToken(match[1]);
 
       // Only trusted admins may access this endpoint.
       if (decodedToken.admin !== true) {
@@ -254,11 +334,7 @@ exports.getAdminOverview = onRequest(
         },
       });
     } catch (error) {
-      if (
-        error.code === "auth/argument-error" ||
-        error.code === "auth/id-token-expired" ||
-        error.code === "auth/invalid-id-token"
-      ) {
+      if (isTokenError(error)) {
         return res.status(401).json({
           error: "Invalid or expired authentication token.",
         });

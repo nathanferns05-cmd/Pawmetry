@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -16,6 +16,10 @@ import {
   getMedications,
   getUserPets,
 } from "../../services/userService";
+import {
+  cancelEndedMedicationReminders,
+  cancelMedicationReminders,
+} from "../../utils/notifications";
 
 export default function MedicationScreen() {
   const router = useRouter();
@@ -25,7 +29,7 @@ export default function MedicationScreen() {
   const [selectedPet, setSelectedPet] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadMedications = async () => {
+  const loadMedications = async (preferredPetId?: string) => {
     try {
       setLoading(true);
 
@@ -33,11 +37,16 @@ export default function MedicationScreen() {
       setPets(userPets);
 
       if (userPets.length > 0) {
-        const pet = userPets[0];
+        // Stay on the pet the user was looking at, if it still exists.
+        const pet =
+          userPets.find((item) => item.id === preferredPetId) ||
+          userPets[0];
         setSelectedPet(pet);
 
         const petMedications = await getMedications(pet.id);
         setMedications(petMedications);
+
+        cancelEndedMedicationReminders(petMedications as any[]);
       } else {
         setMedications([]);
       }
@@ -48,13 +57,18 @@ export default function MedicationScreen() {
     }
   };
 
+  // Remembers the chosen pet across focus reloads without re-running them.
+  const selectedPetIdRef = useRef<string | undefined>(undefined);
+
   useFocusEffect(
     useCallback(() => {
-      loadMedications();
+      loadMedications(selectedPetIdRef.current);
+      // Only reload when the screen regains focus.
     }, [])
   );
 
   const handlePetChange = async (pet: any) => {
+    selectedPetIdRef.current = pet.id;
     setSelectedPet(pet);
     setLoading(true);
 
@@ -84,6 +98,10 @@ export default function MedicationScreen() {
         style: "destructive",
         onPress: async () => {
           try {
+            await cancelMedicationReminders(
+              medication.notificationIds,
+            );
+
             await deleteMedication(
               selectedPet.id,
               medication.id,
@@ -117,20 +135,8 @@ const handleEditMedication = (medication: any) => {
   router.push({
     pathname: "/medication/add",
     params: {
-      edit: "true",
       medicationId: medication.id,
       petId: selectedPet.id,
-      name: medication.name || "",
-      dosage: medication.dosage || "",
-      frequency: medication.frequency || "",
-      time: medication.time || "",
-      startDate: medication.startDate || "",
-      endDate: medication.endDate || "",
-      notes: medication.notes || "",
-      active: String(medication.active ?? true),
-      notificationIds: JSON.stringify(
-        medication.notificationIds || [],
-      ),
     },
   });
 };

@@ -38,20 +38,14 @@ export default function Register() {
   const handleRegister = async () => {
     setError("");
 
-    if (!email || !password) {
+    const trimmedEmail = email.trim();
+
+    if (!trimmedEmail || !password) {
       setError("Please enter both email and password.");
       return;
     }
 
-    // Strong password validation
-    const strongPassword =
-      password.length >= 8 &&
-      /[A-Z]/.test(password) &&
-      /[a-z]/.test(password) &&
-      /[0-9]/.test(password) &&
-      /[^A-Za-z0-9]/.test(password);
-
-    if (!strongPassword) {
+    if (!isStrongPassword(password)) {
       setError("Please create a strong password.");
       return;
     }
@@ -61,7 +55,7 @@ export default function Register() {
     try {
       const userCredential = await createUserWithEmailAndPassword(
         auth,
-        email,
+        trimmedEmail,
         password,
       );
 

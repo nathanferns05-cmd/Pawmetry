@@ -1,5 +1,5 @@
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,16 +13,46 @@ import {
 
 import {
   addMedication,
+  deleteMedication,
+  getMedication,
   getUserPets,
+  updateMedication,
 } from "../../services/userService";
 
 import {
-  scheduleMedicationReminder,
+  cancelMedicationReminders,
+  scheduleMedicationReminders,
   setupNotifications,
 } from "../../utils/notifications";
 
+// Reads "08:30 AM" / "20:30" style times saved by older app versions.
+function parseTimeText(text: string | undefined) {
+  const match = text?.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+
+  if (!match) {
+    return null;
+  }
+
+  let hour = Number(match[1]) % 24;
+  const minute = Number(match[2]) % 60;
+  const period = match[3]?.toUpperCase();
+
+  if (period === "PM" && hour < 12) hour += 12;
+  if (period === "AM" && hour === 12) hour = 0;
+
+  return { hour, minute };
+}
+
 export default function AddMedication() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    medicationId?: string;
+    petId?: string;
+  }>();
+  const isEditing = Boolean(params.medicationId && params.petId);
+  const [existingNotificationIds, setExistingNotificationIds] =
+    useState<string[]>([]);
+  const [active, setActive] = useState(true);
 
   const [pets, setPets] = useState<any[]>([]);
   const [selectedPet, setSelectedPet] = useState<any>(null);
@@ -66,10 +96,59 @@ export default function AddMedication() {
       setPets(userPets);
 
       if (userPets.length > 0) {
-        setSelectedPet(userPets[0]);
+        setSelectedPet(
+          userPets.find((pet) => pet.id === params.petId) ||
+            userPets[0],
+        );
+      }
+
+      if (isEditing) {
+        await loadMedication();
       }
     } catch (error) {
       setError("Unable to load your pets.");
+    }
+  };
+
+  const loadMedication = async () => {
+    const medication = await getMedication(
+      params.petId as string,
+      params.medicationId as string,
+    );
+
+    if (!medication) {
+      setError("This medication no longer exists.");
+      return;
+    }
+
+    setName(medication.name || "");
+    setDosage(medication.dosage || "");
+    setFrequency(medication.frequency || "Once a day");
+    setNotes(medication.notes || "");
+    setActive(medication.active ?? true);
+    setExistingNotificationIds(medication.notificationIds || []);
+
+    const reminder =
+      typeof medication.reminderHour === "number" &&
+      typeof medication.reminderMinute === "number"
+        ? {
+            hour: medication.reminderHour,
+            minute: medication.reminderMinute,
+          }
+        : parseTimeText(medication.time);
+
+    if (reminder) {
+      const reminderTime = new Date();
+      reminderTime.setHours(reminder.hour, reminder.minute, 0, 0);
+      setTime(reminderTime);
+    }
+
+    if (medication.startDate) {
+      setStartDate(new Date(medication.startDate));
+    }
+
+    if (medication.endDate) {
+      setEndDate(new Date(medication.endDate));
     }
   };
 
@@ -116,39 +195,59 @@ export default function AddMedication() {
     setSaving(true);
 
     try {
+      // Replace the old reminders rather than stacking new ones on top.
+      if (isEditing) {
+        await cancelMedicationReminders(existingNotificationIds);
+      }
+
       let notificationIds: string[] = [];
 
       const notificationsEnabled =
-        await setupNotifications();
+        active && (await setupNotifications());
 
       if (notificationsEnabled) {
-        const hours = time.getHours();
-        const minutes = time.getMinutes();
-
-        const notificationId =
-          await scheduleMedicationReminder(
-            name.trim(),
-            dosage.trim(),
-            hours,
-            minutes
-          );
-
-        if (notificationId) {
-          notificationIds.push(notificationId);
-        }
+        notificationIds = await scheduleMedicationReminders({
+          medicationName: name.trim(),
+          dosage: dosage.trim(),
+          frequency,
+          hour: time.getHours(),
+          minute: time.getMinutes(),
+          startDate,
+          endDate,
+        });
       }
 
-      await addMedication(selectedPet.id, {
+      const medicationData = {
         name: name.trim(),
         dosage: dosage.trim(),
         frequency,
         time: formatTime(time),
+        reminderHour: time.getHours(),
+        reminderMinute: time.getMinutes(),
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
         notes: notes.trim(),
-        active: true,
+        active,
         notificationIds,
-      });
+      };
+
+      if (isEditing && selectedPet.id === params.petId) {
+        await updateMedication(
+          selectedPet.id,
+          params.medicationId as string,
+          medicationData,
+        );
+      } else {
+        await addMedication(selectedPet.id, medicationData);
+
+        // Editing moved this medication to another pet.
+        if (isEditing) {
+          await deleteMedication(
+            params.petId as string,
+            params.medicationId as string,
+          );
+        }
+      }
 
       router.back();
     } catch (error) {
@@ -180,7 +279,7 @@ export default function AddMedication() {
 
           <View>
             <Text style={styles.title}>
-              Add Medication
+              {isEditing ? "Edit Medication" : "Add Medication"}
             </Text>
 
             <Text style={styles.subtitle}>
@@ -437,7 +536,7 @@ export default function AddMedication() {
                 <DateTimePicker
                   value={startDate}
                   mode="date"
-                  minimumDate={new Date()}
+                  minimumDate={isEditing ? undefined : new Date()}
                   onChange={(event, selectedDate) => {
                     setShowStartPicker(false);
 

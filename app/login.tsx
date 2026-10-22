@@ -2,7 +2,6 @@ import { useRouter } from "expo-router";
 import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
-  getIdTokenResult,
 } from "firebase/auth";
 import { Eye, EyeOff } from "lucide-react-native";
 import { useState } from "react";
@@ -19,7 +18,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import CustomButton from "../components/CustomButton";
 import { auth } from "../config/firebaseConfig";
-import { userProfileExists } from "../services/userService";
+import { getSignedInRoute } from "../services/authRouting";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -58,38 +57,34 @@ const handleLogin = async () => {
       await AsyncStorage.removeItem("rememberMe");
     }
 
-    // Ensure the latest custom claims are loaded.
-    const tokenResult = await getIdTokenResult(user, true);
-
-    // Email verification is required for admin access.
-    if (!user.emailVerified) {
-      router.replace("/verify-email");
-      return;
-    }
-
-    // Send administrators directly to the admin dashboard.
-    if (tokenResult.claims.admin === true) {
-      router.replace("/admin");
-      return;
-    }
-
-    // Preserve the existing normal-user flow.
-    const profileExists = await userProfileExists();
-
-    if (profileExists) {
-      router.replace("/(tabs)/home");
-    } else {
-      router.replace("/setup");
-    }
+    router.replace(await getSignedInRoute(user));
   } catch (error: any) {
-    console.log("LOGIN ERROR:", error);
-    console.log("LOGIN ERROR CODE:", error?.code);
+    console.log("Login error:", error?.code);
 
-    setError(
-      error?.code
-        ? `${error.code}: ${error.message}`
-        : "Unable to log in. Please try again."
-    );
+    switch (error?.code) {
+      case "auth/invalid-credential":
+      case "auth/invalid-email":
+      case "auth/user-not-found":
+      case "auth/wrong-password":
+        setError("Incorrect email or password.");
+        break;
+
+      case "auth/user-disabled":
+        setError("This account has been disabled.");
+        break;
+
+      case "auth/too-many-requests":
+        setError("Too many attempts. Please try again later.");
+        break;
+
+      case "auth/network-request-failed":
+        setError("Network error. Please check your internet connection.");
+        break;
+
+      default:
+        setError("Unable to log in. Please try again.");
+        break;
+    }
   } finally {
     setLoading(false);
   }

@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   ImageBackground,
@@ -11,9 +11,15 @@ import {
   View,
 } from "react-native";
 
+import { auth } from "../../config/firebaseConfig";
+import { getFunctionUrl } from "../../config/functions";
+import { getUserPets } from "../../services/userService";
+
+const MAX_SYMPTOMS_LENGTH = 2000;
+
 type Analysis = {
   level: string;
-  possibleCauses: string;
+  possibleCauses: string[];
   monitor: string;
   nextStep: string;
   emergency: string;
@@ -30,6 +36,21 @@ export default function SymptomChecker() {
 
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
+  const [pet, setPet] = useState<{ species?: string; age?: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    getUserPets()
+      .then((pets) => {
+        if (pets.length > 0) {
+          setPet(pets[0] as { species?: string; age?: number });
+        }
+      })
+      .catch((error) => {
+        console.log("Unable to load pet for Vet-Bot:", error);
+      });
+  }, []);
 
   const checkSymptoms = async () => {
     setError("");
@@ -50,46 +71,55 @@ export default function SymptomChecker() {
       return;
     }
 
+    if (!auth.currentUser) {
+      setError("Your session has expired. Please log in again.");
+      return;
+    }
+
     setChecking(true);
 
     try {
-      const response = await fetch(
-        "http://192.168.176.147:5001/pawmetry-62af8/us-central1/analyzeSymptoms",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            symptoms: symptoms.trim(),
-            duration,
-            severity,
-            species: "Dog",
-            age: "Unknown",
-          }),
+      const idToken = await auth.currentUser.getIdToken();
+
+      const response = await fetch(getFunctionUrl("analyzeSymptoms"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
         },
-      );
+        body: JSON.stringify({
+          symptoms: symptoms.trim(),
+          duration,
+          severity,
+          species: pet?.species || "Unknown",
+          age:
+            typeof pet?.age === "number" && pet.age > 0
+              ? `${pet.age} year(s)`
+              : "Unknown",
+        }),
+      });
 
-      console.log("Vet-Bot status:", response.status);
+      const data = await response.json().catch(() => null);
 
-      const responseText = await response.text();
-
-      console.log("Vet-Bot response:", responseText);
-
-      if (!response.ok) {
-        throw new Error(responseText || "Backend request failed.");
+      if (!response.ok || !data) {
+        throw new Error(
+          data?.error || "Vet-Bot is unavailable right now. Please try again.",
+        );
       }
 
-      const data = JSON.parse(responseText);
-
-      setAnalysis(data);
+      setAnalysis({
+        ...data,
+        possibleCauses: Array.isArray(data.possibleCauses)
+          ? data.possibleCauses
+          : [String(data.possibleCauses || "")],
+      });
     } catch (error) {
-      console.log("========== VET-BOT ERROR ==========");
-      console.log(error);
-      console.log("===================================");
+      console.log("Vet-Bot error:", error);
 
       setError(
-        error instanceof Error ? error.message : "Unknown Vet-Bot error",
+        error instanceof Error
+          ? error.message
+          : "Vet-Bot is unavailable right now. Please try again.",
       );
     } finally {
       setChecking(false);
@@ -203,6 +233,7 @@ export default function SymptomChecker() {
                 placeholderTextColor="#A18D80"
                 value={symptoms}
                 onChangeText={setSymptoms}
+                maxLength={MAX_SYMPTOMS_LENGTH}
                 multiline
                 textAlignVertical="top"
               />
@@ -479,7 +510,9 @@ export default function SymptomChecker() {
                 </View>
 
                 <Text style={styles.resultText}>
-                  {analysis.possibleCauses}
+                  {analysis.possibleCauses
+                    .map((cause) => `• ${cause}`)
+                    .join("\n")}
                 </Text>
               </View>
 

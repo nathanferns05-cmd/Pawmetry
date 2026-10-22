@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "expo-router";
+import { signOut } from "firebase/auth";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   ImageBackground,
   KeyboardAvoidingView,
@@ -18,6 +20,7 @@ import * as ImagePicker from "expo-image-picker";
 import {
   ArrowLeft,
   Camera,
+  LogOut,
   PawPrint,
   Save,
   User,
@@ -35,6 +38,7 @@ import {
   updatePet,
 } from "../../services/userService";
 
+import { auth } from "../../config/firebaseConfig";
 import { uploadImageToCloudinary } from "../../utils/cloudinary";
 
 const speciesList = [
@@ -93,6 +97,30 @@ type PetData = {
 
 export default function ProfileScreen() {
   const router = useRouter();
+
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = () => {
+    Alert.alert("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log Out",
+        style: "destructive",
+        onPress: async () => {
+          setLoggingOut(true);
+
+          try {
+            await signOut(auth);
+            router.replace("/");
+          } catch (error) {
+            console.log("Logout failed:", error);
+            Alert.alert("Error", "Unable to log out. Please try again.");
+            setLoggingOut(false);
+          }
+        },
+      },
+    ]);
+  };
 
   const [profile, setProfile] = useState<ProfileData>({
     fullName: "",
@@ -1495,6 +1523,22 @@ export default function ProfileScreen() {
               </>
             )}
           </View>
+
+          <Pressable
+            style={[
+              styles.saveButton,
+              styles.logoutButton,
+              loggingOut && styles.saveButtonDisabled,
+            ]}
+            onPress={handleLogout}
+            disabled={loggingOut}
+          >
+            <LogOut size={18} color="#B75D45" strokeWidth={2} />
+
+            <Text style={styles.logoutButtonText}>
+              {loggingOut ? "Logging out..." : "Log Out"}
+            </Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </ImageBackground>
@@ -1887,6 +1931,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     color: "#FFFFFF",
+  },
+
+  logoutButton: {
+    borderWidth: 1.5,
+    borderColor: "#B75D45",
+    backgroundColor: "#FFFFFF",
+    marginTop: 4,
+    marginBottom: 24,
+  },
+
+  logoutButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#B75D45",
   },
 
   /* EMPTY */

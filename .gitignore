@@ -58,3 +58,9 @@ coverage/
 # IDE settings
 .idea/
 .vscode/
+
+# Archives
+*.zip
+
+# Stray nested repo
+/Pawmetry/

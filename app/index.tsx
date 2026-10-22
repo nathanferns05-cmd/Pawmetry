@@ -1,34 +1,58 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
-import { Image, ImageBackground, StyleSheet, Text, View } from "react-native";
-import { onAuthStateChanged } from "firebase/auth";
+import {
+  ActivityIndicator,
+  Image,
+  ImageBackground,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "../config/firebaseConfig";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "expo-router";
 import CustomButton from "../components/CustomButton";
+import { getSignedInRoute } from "../services/authRouting";
 
-import firebaseConfig from "@/config/firebaseConfig";
 export default function WelcomeScreen() {
   const router = useRouter();
+  const [checkingSession, setCheckingSession] = useState(true);
 
-useEffect(()=>{
+  useEffect(() => {
+    // Only check the saved session once, when the app opens.
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      unsubscribe();
 
-const unsubscribe = onAuthStateChanged(
-auth,
-(user)=>{
+      try {
+        if (user) {
+          const rememberMe = await AsyncStorage.getItem("rememberMe");
 
-//if(user){
-// router.replace("/(tabs)");
-//}
-//else{
-// router.replace("/login");
-//}
+          if (rememberMe === "true") {
+            router.replace(await getSignedInRoute(user));
+            return;
+          }
 
-});
+          // "Remember me" was off: start a fresh session.
+          await signOut(auth);
+        }
+      } catch (error) {
+        console.log("Unable to restore session:", error);
+      }
 
+      setCheckingSession(false);
+    });
 
-return unsubscribe;
+    return unsubscribe;
+  }, [router]);
 
-},[]);  
+  if (checkingSession) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator size="large" color="#9C532B" />
+      </View>
+    );
+  }
 
   return (
     <ImageBackground
@@ -95,6 +119,13 @@ return unsubscribe;
 const styles = StyleSheet.create({
   background: {
     flex: 1,
+  },
+
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f5ece3",
   },
 
   overlay: {

@@ -10,6 +10,7 @@ import {
 
 import CustomButton from "../components/CustomButton";
 import { auth } from "../config/firebaseConfig";
+import { getSignedInRoute } from "../services/authRouting";
 
 export default function VerifyEmail() {
   const router = useRouter();
@@ -31,7 +32,7 @@ export default function VerifyEmail() {
       await reload(auth.currentUser);
 
       if (auth.currentUser.emailVerified) {
-        router.replace("/setup");
+        router.replace(await getSignedInRoute(auth.currentUser));
       } else {
         setError(
           "Please verify your email using the link sent to your inbox."

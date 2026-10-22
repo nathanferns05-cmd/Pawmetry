@@ -26,8 +26,11 @@ export async function saveOwnerProfile(data: {
     throw new Error("User not logged in");
   }
 
+  const profileRef = doc(db, "users", uid);
+  const existing = await getDoc(profileRef);
+
   await setDoc(
-    doc(db, "users", uid),
+    profileRef,
     {
       fullName: data.fullName,
       phone: data.phone,
@@ -36,7 +39,10 @@ export async function saveOwnerProfile(data: {
       city: data.city,
       emergencyContact: data.emergencyContact,
       email: auth.currentUser?.email || "",
-      createdAt: serverTimestamp(),
+      // Keep the original sign-up time if setup is run again.
+      ...(existing.exists()
+        ? { updatedAt: serverTimestamp() }
+        : { createdAt: serverTimestamp() }),
     },
     { merge: true }
   );
@@ -147,6 +153,8 @@ export async function addMedication(
     dosage: string;
     frequency: string;
     time: string;
+    reminderHour: number;
+    reminderMinute: number;
     startDate: string;
     endDate: string;
     notes: string;
@@ -169,6 +177,40 @@ export async function addMedication(
   );
 
   return medicationRef.id;
+}
+
+export async function getMedication(petId: string, medicationId: string) {
+  const uid = auth.currentUser?.uid;
+
+  if (!uid) {
+    throw new Error("User not logged in");
+  }
+
+  const snapshot = await getDoc(
+    doc(db, "users", uid, "pets", petId, "medications", medicationId),
+  );
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  return {
+    id: snapshot.id,
+    ...snapshot.data(),
+  } as {
+    id: string;
+    name?: string;
+    dosage?: string;
+    frequency?: string;
+    time?: string;
+    reminderHour?: number;
+    reminderMinute?: number;
+    startDate?: string;
+    endDate?: string;
+    notes?: string;
+    active?: boolean;
+    notificationIds?: string[];
+  };
 }
 
 export async function getMedications(petId: string) {
@@ -196,6 +238,8 @@ export async function updateMedication(
     dosage: string;
     frequency: string;
     time: string;
+    reminderHour: number;
+    reminderMinute: number;
     startDate: string;
     endDate: string;
     notes: string;

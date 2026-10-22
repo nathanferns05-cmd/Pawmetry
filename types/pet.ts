@@ -9,15 +9,16 @@ export type Gender =
   | "Male"
   | "Female";
 
+// Matches the documents saved under users/{uid}/pets.
 export interface Pet {
+  id: string;
   petName: string;
-  species: Species;
+  species: Species | string;
   breed: string;
-  gender: Gender;
-  dob: string;
+  gender: Gender | string;
+  age: number;
   weight: string;
-  color: string;
   vaccinated: boolean;
   microchipped: boolean;
-  photo: string;
+  petPhoto: string;
 }
