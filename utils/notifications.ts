@@ -35,7 +35,6 @@ export async function setupNotifications() {
           {
             name: "Medication Reminders",
             importance: Notifications.AndroidImportance.HIGH,
-            sound: "default",
           }
         );
       }
@@ -56,7 +55,6 @@ export async function setupNotifications() {
         {
           name: "Medication Reminders",
           importance: Notifications.AndroidImportance.HIGH,
-          sound: "default",
         }
       );
     }

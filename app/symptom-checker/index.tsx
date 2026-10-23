@@ -12,18 +12,12 @@ import {
 } from "react-native";
 
 import { auth } from "../../config/firebaseConfig";
-import { getFunctionUrl } from "../../config/functions";
 import { getUserPets } from "../../services/userService";
-
-const MAX_SYMPTOMS_LENGTH = 2000;
-
-type Analysis = {
-  level: string;
-  possibleCauses: string[];
-  monitor: string;
-  nextStep: string;
-  emergency: string;
-};
+import {
+  analyzeSymptoms,
+  MAX_SYMPTOMS_LENGTH,
+  type VetBotAnalysis as Analysis,
+} from "../../services/vetBot";
 
 export default function SymptomChecker() {
   const router = useRouter();
@@ -79,48 +73,32 @@ export default function SymptomChecker() {
     setChecking(true);
 
     try {
-      const idToken = await auth.currentUser.getIdToken();
-
-      const response = await fetch(getFunctionUrl("analyzeSymptoms"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          symptoms: symptoms.trim(),
-          duration,
-          severity,
-          species: pet?.species || "Unknown",
-          age:
-            typeof pet?.age === "number" && pet.age > 0
-              ? `${pet.age} year(s)`
-              : "Unknown",
-        }),
+      const result = await analyzeSymptoms({
+        symptoms: symptoms.trim(),
+        duration,
+        severity,
+        species: pet?.species || "Unknown",
+        age:
+          typeof pet?.age === "number" && pet.age > 0
+            ? `${pet.age} year(s)`
+            : "Unknown",
       });
 
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok || !data) {
-        throw new Error(
-          data?.error || "Vet-Bot is unavailable right now. Please try again.",
-        );
-      }
-
-      setAnalysis({
-        ...data,
-        possibleCauses: Array.isArray(data.possibleCauses)
-          ? data.possibleCauses
-          : [String(data.possibleCauses || "")],
-      });
-    } catch (error) {
+      setAnalysis(result);
+    } catch (error: any) {
       console.log("Vet-Bot error:", error);
 
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Vet-Bot is unavailable right now. Please try again.",
-      );
+      const message = String(error?.message || "");
+
+      if (/permission|api.*not.*enabled|403/i.test(message)) {
+        setError("Vet-Bot is not set up yet. Please try again later.");
+      } else if (/quota|429|resource.exhausted/i.test(message)) {
+        setError("Vet-Bot is busy right now. Please try again in a minute.");
+      } else if (/network|fetch/i.test(message)) {
+        setError("Network error. Please check your internet connection.");
+      } else {
+        setError("Vet-Bot is unavailable right now. Please try again.");
+      }
     } finally {
       setChecking(false);
     }

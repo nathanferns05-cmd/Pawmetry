@@ -1,7 +1,14 @@
-import { useRouter } from "expo-router";
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Trash2,
+} from "lucide-react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
   Dimensions,
   Image,
   Pressable,
@@ -11,7 +18,11 @@ import {
   View,
 } from "react-native";
 
-import { getPetPhotos, getUserPets } from "../../services/userService";
+import {
+  deletePetPhoto,
+  getPetPhotos,
+  getUserPets,
+} from "../../services/userService";
 
 type Pet = {
   id: string;
@@ -32,10 +43,14 @@ export default function GalleryScreen() {
   const [pet, setPet] = useState<Pet | null>(null);
   const [photos, setPhotos] = useState<PetPhoto[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadGallery();
-  }, []);
+  // Reload whenever the tab is shown, so newly added photos appear.
+  useFocusEffect(
+    useCallback(() => {
+      loadGallery();
+    }, [])
+  );
 
   useEffect(() => {
     if (photos.length <= 1) return;
@@ -70,6 +85,53 @@ export default function GalleryScreen() {
     } catch (error) {
       console.log("Failed to load gallery:", error);
     }
+  }
+
+  function handleDeletePhoto(photo: PetPhoto) {
+    if (!pet || deletingId) return;
+
+    Alert.alert(
+      "Remove Photo",
+      "Are you sure you want to remove this photo from the gallery?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingId(photo.id);
+
+            try {
+              await deletePetPhoto(pet.id, photo.id);
+
+              const remaining = photos.filter(
+                (item) => item.id !== photo.id
+              );
+              const nextIndex = Math.min(
+                activeIndex,
+                Math.max(remaining.length - 1, 0)
+              );
+
+              setPhotos(remaining);
+              setActiveIndex(nextIndex);
+
+              scrollRef.current?.scrollTo({
+                x: nextIndex * SCREEN_WIDTH,
+                animated: false,
+              });
+            } catch (error) {
+              console.log("Failed to remove photo:", error);
+              Alert.alert(
+                "Error",
+                "Unable to remove this photo. Please try again."
+              );
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ]
+    );
   }
 
   function handleScroll(event: any) {
@@ -129,6 +191,19 @@ export default function GalleryScreen() {
                     {index + 1} / {photos.length}
                   </Text>
                 </View>
+
+                <Pressable
+                  style={styles.deleteButton}
+                  onPress={() => handleDeletePhoto(photo)}
+                  disabled={deletingId !== null}
+                  accessibilityLabel="Remove photo"
+                >
+                  {deletingId === photo.id ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Trash2 size={18} color="#FFFFFF" strokeWidth={2} />
+                  )}
+                </Pressable>
               </View>
             ))}
           </ScrollView>
@@ -300,6 +375,18 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
+  },
+
+  deleteButton: {
+    position: "absolute",
+    top: 16,
+    right: 18,
+    width: 39,
+    height: 39,
+    borderRadius: 20,
+    backgroundColor: "rgba(183,93,69,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   controls: {

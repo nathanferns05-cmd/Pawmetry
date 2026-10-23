@@ -319,6 +319,18 @@ export async function addPetPhoto(
   return photoRef.id;
 }
 
+// Removes the photo from the pet's gallery. The image file itself stays on
+// Cloudinary, since deleting it there needs a signed (server-side) request.
+export async function deletePetPhoto(petId: string, photoId: string) {
+  const uid = auth.currentUser?.uid;
+
+  if (!uid) {
+    throw new Error("User not logged in");
+  }
+
+  await deleteDoc(doc(db, "users", uid, "pets", petId, "gallery", photoId));
+}
+
 export async function getPetPhotos(petId: string) {
   const uid = auth.currentUser?.uid;
 
